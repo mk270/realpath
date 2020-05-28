@@ -1,6 +1,6 @@
 {application, realpath,
- [{description, "An OTP library"},
-  {vsn, "0.1.1"},
+ [{description, "Filename canonicaliser"},
+  {vsn, "1.3.0"},
   {registered, []},
   {applications,
    [kernel,
