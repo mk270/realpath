@@ -1,0 +1,7 @@
+@author Martin Keegan <martin@no.ucant.org>
+@copyright (C) 2020, Martin Keegan
+@doc 
+A library for dealing with UNIX paths, resolving symlinks and parent
+directories.
+
+@end

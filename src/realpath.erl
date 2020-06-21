@@ -5,15 +5,6 @@
 %% This programme is free software; you may redistribute and/or modify it under
 %% the terms of the Apache Software Licence v2.0.
 
-%%%-------------------------------------------------------------------
-%%% @author Martin Keegan <martin@no.ucant.org>
-%%% @copyright (C) 2020, Martin Keegan
-%%% @doc
-%%%
-%%% @end
-%%% Created : 27 May 2020 by Martin Keegan <martin@no.ucant.org>
-%%%-------------------------------------------------------------------
-
 -module(realpath).
 -include_lib("eunit/include/eunit.hrl").
 -export([canonicalise/1]).
