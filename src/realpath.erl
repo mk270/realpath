@@ -5,6 +5,15 @@
 %% This programme is free software; you may redistribute and/or modify it under
 %% the terms of the Apache Software Licence v2.0.
 
+%%%-------------------------------------------------------------------
+%%% @author Martin Keegan <martin@no.ucant.org>
+%%% @copyright (C) 2020, Martin Keegan
+%%% @doc
+%%%
+%%% @end
+%%% Created : 27 May 2020 by Martin Keegan <martin@no.ucant.org>
+%%%-------------------------------------------------------------------
+
 -module(realpath).
 -include_lib("eunit/include/eunit.hrl").
 -export([canonicalise/1]).
@@ -27,7 +36,12 @@
 % process of substring testing should restart with against the target of
 % symlink.
 
--spec canonicalise(list()) -> {'ok', string()} | {'error', atom()}.
+%% @doc
+%% Return a canonicalised pathname, having resolved symlinks to their
+%% destination. Modelled on realpath(3).
+%% @end
+
+-spec canonicalise(string()) -> {'ok', string()} | {'error', atom()}.
 canonicalise(Path) when is_list(Path) ->
     check_canonical(Path, 20);
 canonicalise(_Path) when is_binary(_Path) ->
@@ -70,6 +84,10 @@ is_symlink(Dirname, Basename) ->
 join_non_null([]) -> "";
 join_non_null(SS) -> filename:join(SS).
 
+%% @doc
+%% Return a path where the use of ".." to indicate parent directory has
+%% been resolved.
+%% @end
 -spec normalise(list()) -> {'ok', string()} | {'error', atom()}.
 normalise(S=[$/|_]) when is_list(S)->
     Parts = filename:split(S),
