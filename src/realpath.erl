@@ -86,7 +86,7 @@ join_non_null(SS) -> filename:join(SS).
 
 %% @doc
 %% Return a path where the use of ".." to indicate parent directory has
-%% been resolved.
+%% been resolved. Currently does not accept relative paths.
 %% @end
 -spec normalise(list()) -> {'ok', string()} | {'error', atom()}.
 normalise(S=[$/|_]) when is_list(S)->
