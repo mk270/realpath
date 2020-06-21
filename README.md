@@ -7,6 +7,7 @@ resolving symlinks
 Usage
 -----
 
+```erlang
      > realpath:canonicalise("/usr/local/man/man1/dwm.1").
      {ok, "/usr/local/share/man/man1/dwm.1"}
      > realpath:canonicalise("/tmp/deliberate-loop").
@@ -15,4 +16,9 @@ Usage
      {ok, "/var/log"}
      > realpath:normalise("../etc/passwd").
      {error, relative_path}
+```
 
+Documentation
+-------------
+
+Online at [realpath documentation](https://hexdocs.pm/realpath).
