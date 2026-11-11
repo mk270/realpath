@@ -30,9 +30,19 @@
 %% @doc
 %% Return a canonicalised pathname, having resolved symlinks to their
 %% destination. Modelled on realpath(3).
+%%
+%% Failures are errors, never guesses: it returns `{error, loop}' if it
+%% follows too many links, `{error, undecodable_link}' for a link whose
+%% target cannot be represented as a string (which happens when the target
+%% is not valid in the VM's file name encoding), and `{error, Reason}',
+%% with a POSIX error atom such as `eacces' or `enametoolong', if it cannot
+%% tell whether part of the path is a link. A part of the path that does
+%% not exist is not an error, since there is then nothing to resolve.
 %% @end
 
--spec canonicalise(string()) -> {'ok', string()} | {'error', atom()}.
+-spec canonicalise(Path) -> Result
+              when Path   :: string() | binary(),
+                   Result :: {'ok', string()} | {'error', atom()}.
 canonicalise(Path) when is_list(Path) ->
     check_canonical(Path, 20);
 canonicalise(_Path) when is_binary(_Path) ->
@@ -54,12 +64,35 @@ check_fragments([Head|Tail], AlreadyChecked, TTL) ->
         {true, Referent} ->
             TailJoined = join_non_null(Tail),
             AllJoined = filename:join(Referent, TailJoined),
-            check_canonical(AllJoined, TTL - 1)
+            check_canonical(AllJoined, TTL - 1);
+        {error, _Reason} = Error ->
+            Error
     end.
 
+% Is Basename, in Dirname, a symbolic link, and if so where does it point?
+%
+% file:read_link_all/1 is used, not file:read_link/1. When the VM's file
+% name encoding is UTF-8, read_link/1 answers {error, einval} for a link
+% whose target is not valid UTF-8, which is also its answer for something
+% that is not a link at all; such a link would go unnoticed, and be
+% followed by the operating system after the path had been judged free of
+% links. read_link_all/1 returns that target as a binary instead, which
+% cannot be put into a string, so the path is refused.
+%
+% Only what is certainly not a link (einval), or not there (enoent,
+% enotdir), counts as "not a link"; any other error means we cannot tell,
+% and is passed on.
+-spec is_symlink(Dirname, Basename) -> Result
+              when Dirname  :: string(),
+                   Basename :: string(),
+                   Result   :: false
+                             | {true, string()}
+                             | {error, atom()}.
 is_symlink(Dirname, Basename) ->
     Path = filename:join(Dirname, Basename),
-    case file:read_link(Path) of
+    case file:read_link_all(Path) of
+        {ok, Name} when is_binary(Name) ->
+            {error, undecodable_link};
         {ok, Name} ->
             case Name of
                 % absolute link
@@ -69,7 +102,12 @@ is_symlink(Dirname, Basename) ->
                 _ ->
                     {true, filename:join(Dirname, Name)}
             end;
-        _ -> false
+        {error, Reason} when Reason =:= einval;
+                             Reason =:= enoent;
+                             Reason =:= enotdir ->
+            false;
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 join_non_null([]) -> "";
@@ -79,7 +117,9 @@ join_non_null(SS) -> filename:join(SS).
 %% Return a path where the use of ".." to indicate parent directory has
 %% been resolved. Currently does not accept relative paths.
 %% @end
--spec normalise(list()) -> {'ok', string()} | {'error', atom()}.
+-spec normalise(Path) -> Result
+              when Path   :: string() | binary(),
+                   Result :: {'ok', string()} | {'error', atom()}.
 normalise(S=[$/|_]) when is_list(S)->
     Parts = filename:split(S),
     {ok, filename:join(lists:reverse(normalise(Parts, [])))};
@@ -114,3 +154,146 @@ make_fragments_test_data() ->
 make_fragments_test_() ->
     [ ?_assertEqual(Expected, make_fragments(Observed))
       || {Observed, Expected} <- make_fragments_test_data() ].
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Tests of canonicalise/1 and normalise/1 as they behave now.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% The fixture is a real directory tree with real symbolic links, under a
+%% fresh temporary directory:
+%%   Base/real/file  Base/real/deep/
+%%   Base/rel -> real   Base/abs -> Base/real
+%%   Base/chain1 -> chain2 -> real
+%%   Base/tofile -> real/file   Base/dangling -> nothere
+%%   Base/loop1 -> loop2 -> loop1
+%%   Base/up -> ../<Base's own name>/real   (a link whose target has "..")
+%%   Base/outside_<0xE9>/secret   (a directory name that is not valid UTF-8)
+%%   Base/badlink -> Base/outside_<0xE9>/secret   (an undecodable target)
+%%   Base/badrel -> outside_<0xE9>/secret   (the same, as a relative link)
+%%   Base/locked   (mode 000: nothing inside can be reached)
+canonicalise_test_() ->
+    {setup, fun fixture_setup/0, fun fixture_teardown/1,
+     fun canonicalise_tests/1}.
+
+fixture_setup() ->
+    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Base = filename:absname("realpath_test_" ++ Unique),
+    ok = filelib:ensure_path(filename:join([Base, "real", "deep"])),
+    ok = file:write_file(filename:join([Base, "real", "file"]), <<"data">>),
+    Link = fun(Target, Name) ->
+               ok = file:make_symlink(Target, filename:join(Base, Name))
+           end,
+    Link("real", "rel"),
+    Link(filename:join(Base, "real"), "abs"),
+    Link("chain2", "chain1"),
+    Link("real", "chain2"),
+    Link("real/file", "tofile"),
+    Link("nothere", "dangling"),
+    Link("loop2", "loop1"),
+    Link("loop1", "loop2"),
+    Link("../" ++ filename:basename(Base) ++ "/real", "up"),
+    % names that are not valid UTF-8 can only be written as binaries
+    BaseBin = list_to_binary(Base),
+    Outside = <<BaseBin/binary, "/outside_", 233>>,
+    ok = file:make_dir(Outside),
+    ok = file:write_file(<<Outside/binary, "/secret">>, <<"SECRET">>),
+    ok = file:make_symlink(<<Outside/binary, "/secret">>,
+                           <<BaseBin/binary, "/badlink">>),
+    ok = file:make_symlink(<<"outside_", 233, "/secret">>,
+                           <<BaseBin/binary, "/badrel">>),
+    Locked = filename:join(Base, "locked"),
+    ok = file:make_dir(Locked),
+    ok = file:change_mode(Locked, 8#000),
+    Base.
+
+fixture_teardown(Base) ->
+    _ = file:change_mode(filename:join(Base, "locked"), 8#755),
+    file:del_dir_r(Base).
+
+undecodable_link_checked(Result) ->
+    case file:native_name_encoding() of
+        utf8   -> ?assertEqual({error, undecodable_link}, Result);
+        latin1 -> ?assertMatch({ok, _}, Result)
+    end.
+
+canonicalise_tests(Base) ->
+    BaseBin = list_to_binary(Base),
+    % Base itself is canonicalised first, so the expectations don't depend
+    % on whether the directory the tests run in is reached through links.
+    {ok, Canon} = canonicalise(Base),
+    In = fun(Rel) -> {ok, filename:join(Canon, Rel)} end,
+    C = fun(Rel) -> canonicalise(Base ++ "/" ++ Rel) end,
+    [% links are followed: relative, absolute, chains, to files
+     ?_assertEqual(In("real/deep"), C("real/deep")),
+     ?_assertEqual(In("real/deep"), C("rel/deep")),
+     ?_assertEqual(In("real/deep"), C("abs/deep")),
+     ?_assertEqual(In("real/deep"), C("chain1/deep")),
+     ?_assertEqual(In("real/file"), C("tofile")),
+     % the result always names the same file as the path it came from
+     ?_test(begin
+                [ begin
+                      {ok, Resolved} = C(Link ++ "/file"),
+                      ?assertEqual({ok, <<"data">>}, file:read_file(Resolved))
+                  end || Link <- ["real", "rel", "abs", "chain1"] ],
+                {ok, ToFile} = C("tofile"),
+                ?assertEqual({ok, <<"data">>}, file:read_file(ToFile))
+            end),
+     % a loop of links is an error
+     ?_assertEqual({error, loop}, C("loop1")),
+     ?_assertEqual({error, loop}, C("loop1/x")),
+     % what does not exist is not an error: a dangling link resolves to its
+     % target's name, and missing parts stay as they are
+     ?_assertEqual(In("nothere"), C("dangling")),
+     ?_assertEqual(In("nothere/x"), C("dangling/x")),
+     ?_assertEqual(In("nope/x"), C("nope/x")),
+     % ".", repeated slashes and a trailing slash are tidied away
+     ?_assertEqual(In("real/deep"), canonicalise(Base ++ "/real/./deep")),
+     ?_assertEqual(In("real/deep"), canonicalise(Base ++ "/real//deep")),
+     ?_assertEqual(In("real/deep"), canonicalise(Base ++ "/real/deep/")),
+     % ".." is NOT resolved by canonicalise/1, whether it was in the path or
+     % in a link's target: that is normalise/1's job
+     ?_assertEqual({ok, Canon ++ "/real/../real/file"},
+                   C("real/../real/file")),
+     ?_assertEqual({ok, Canon ++ "/../" ++ filename:basename(Canon)
+                    ++ "/real/deep"}, C("up/deep")),
+     % something that is not a directory has nothing to resolve beneath it
+     ?_assertEqual(In("real/file/x"), C("real/file/x")),
+     % a link whose target is not valid UTF-8 is never skipped. The
+     % operating system follows it ...
+     ?_assertEqual({ok, <<"SECRET">>},
+                   file:read_file(<<BaseBin/binary, "/badlink">>)),
+     ?_assertEqual({ok, <<"SECRET">>},
+                   file:read_file(<<BaseBin/binary, "/badrel">>)),
+     % ... so a VM that cannot put the target in a string refuses the path
+     % (UTF-8), and one that can resolves it (Latin-1), wherever in the
+     % path the link is
+     ?_test(undecodable_link_checked(C("badlink"))),
+     ?_test(undecodable_link_checked(C("badrel"))),
+     ?_test(undecodable_link_checked(C("badlink/more"))),
+     % when we cannot tell whether a part of the path is a link, that is an
+     % error, not "no"
+     ?_assertEqual({error, enametoolong}, C(lists:duplicate(300, $a))),
+     ?_test(case os:cmd("id -u") of
+                "0\n" -> ok;   % root can search anything
+                _ -> ?assertEqual({error, eacces}, C("locked/x"))
+            end),
+     % the edges
+     ?_assertEqual({ok, "/"}, canonicalise("/")),
+     ?_assertEqual({ok, ""}, canonicalise("")),
+     % binaries are refused
+     ?_assertEqual({error, string_required},
+                   canonicalise(list_to_binary(Base)))].
+
+normalise_test_() ->
+    [?_assertEqual({ok, "/b"}, normalise("/a/../b")),
+     ?_assertEqual({ok, "/"}, normalise("/..")),
+     ?_assertEqual({ok, "/"}, normalise("/../..")),
+     ?_assertEqual({ok, "/a/b"}, normalise("/a/./b")),
+     ?_assertEqual({ok, "/a/b"}, normalise("//a//b")),
+     ?_assertEqual({ok, "/a/b"}, normalise("/a/b/")),
+     ?_assertEqual({ok, "/"}, normalise("/")),
+     ?_assertEqual({error, relative_path}, normalise("a/b")),
+     ?_assertEqual({error, relative_path}, normalise("../x")),
+     ?_assertEqual({error, relative_path}, normalise("")),
+     ?_assertEqual({error, string_required}, normalise(<<"/a/../b">>))].
