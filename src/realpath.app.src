@@ -1,6 +1,6 @@
 {application, realpath,
  [{description, "Filename canonicaliser"},
-  {vsn, "1.4.0"},
+  {vsn, "1.4.1"},
   {registered, []},
   {applications,
    [kernel,
