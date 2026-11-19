@@ -6,6 +6,13 @@
 %% the terms of the Apache Software Licence v2.0.
 
 -module(realpath).
+-moduledoc """
+An Erlang implementation of realpath(3): canonicalise file names by
+resolving symbolic links and `..` components.
+
+Paths may be given as strings or as binaries; the result has the same
+type as the argument.
+""".
 -include_lib("eunit/include/eunit.hrl").
 -export([canonicalise/1]).
 -export([normalise/1]).
@@ -27,26 +34,26 @@
 % process of substring testing should restart with against the target of
 % symlink.
 
-%% @doc
-%% Return a canonicalised pathname, having resolved symlinks to their
-%% destination. Modelled on realpath(3).
-%%
-%% The path may be a string or a binary, and the result has the same type.
-%% A binary is raw bytes, which is how the operating system sees a file
-%% name; a string is turned into bytes using the VM's file name encoding,
-%% so it cannot name every file. A binary can.
-%%
-%% Failures are errors, never guesses: it returns `{error, loop}' if it
-%% follows too many links, and `{error, Reason}', with a POSIX error atom
-%% such as `eacces' or `enametoolong', if it cannot tell whether part of the
-%% path is a link. A part of the path that does not exist is not an error,
-%% since there is then nothing to resolve.
-%%
-%% For a string only, `{error, undecodable_link}' is returned for a link
-%% whose target cannot be represented as a string (which happens when the
-%% target is not valid in the VM's file name encoding). A binary has no
-%% such problem.
-%% @end
+-doc """
+Return a canonicalised pathname, having resolved symlinks to their
+destination. Modelled on realpath(3).
+
+The path may be a string or a binary, and the result has the same type.
+A binary is raw bytes, which is how the operating system sees a file
+name; a string is turned into bytes using the VM's file name encoding,
+so it cannot name every file. A binary can.
+
+Failures are errors, never guesses: it returns `{error, loop}` if it
+follows too many links, and `{error, Reason}`, with a POSIX error atom
+such as `eacces` or `enametoolong`, if it cannot tell whether part of
+the path is a link. A part of the path that does not exist is not an
+error, since there is then nothing to resolve.
+
+For a string only, `{error, undecodable_link}` is returned for a link
+whose target cannot be represented as a string (which happens when the
+target is not valid in the VM's file name encoding). A binary has no
+such problem.
+""".
 
 -spec canonicalise(Path) -> Result
               when Path   :: string(),
@@ -141,12 +148,12 @@ absolutise(Name, Dirname) ->                                % relative
 join_non_null([], Like)  -> empty_like(Like);
 join_non_null(SS, _Like) -> filename:join(SS).
 
-%% @doc
-%% Return a path where the use of ".." to indicate parent directory has
-%% been resolved. Currently does not accept relative paths.
-%%
-%% The path may be a string or a binary, and the result has the same type.
-%% @end
+-doc """
+Return a path where the use of ".." to indicate parent directory has
+been resolved. Currently does not accept relative paths.
+
+The path may be a string or a binary, and the result has the same type.
+""".
 -spec normalise(Path) -> Result
               when Path   :: string(),
                    Result :: {'ok', string()} | {'error', atom()};
